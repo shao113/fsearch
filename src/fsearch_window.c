@@ -48,7 +48,9 @@ struct _FsearchApplicationWindow {
     GtkWidget *listview;
     GtkTreeSelection *listview_selection;
     GtkWidget *selection_toggle_button;
+#if GTK_CHECK_VERSION(3,12,0)
     GtkWidget *selection_popover;
+#endif
     GtkWidget *num_folders_label;
     GtkWidget *num_files_label;
     GtkWidget *database_toggle_button;
@@ -58,7 +60,9 @@ struct _FsearchApplicationWindow {
     GtkWidget *database_icon;
     GtkWidget *database_spinner;
     GtkWidget *database_label;
+#if GTK_CHECK_VERSION(3,12,0)
     GtkWidget *database_popover;
+#endif
     GtkWidget *search_label;
     GtkWidget *search_icon;
     GtkWidget *revealer;
@@ -650,6 +654,7 @@ create_view_and_model (FsearchApplicationWindow *app)
     g_object_unref(app->list_model); /* destroy store automatically with view */
 }
 
+#if GTK_CHECK_VERSION(3,12,0)
 void
 set_toggle_button (GtkPopover *popover,
                gpointer    user_data)
@@ -671,6 +676,7 @@ static void
 fill_database_popover (GtkWidget *popover)
 {
 }
+#endif
 
 void
 icon_theme_changed_cb (GtkIconTheme *icon_theme,
@@ -737,6 +743,7 @@ fsearch_application_window_init (FsearchApplicationWindow *self)
                                     GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
     create_view_and_model (self);
+#if GTK_CHECK_VERSION(3,12,0)
     //self->selection_popover = create_popover (self->selection_toggle_button);
     //g_signal_connect (self->selection_popover,
     //                  "closed",
@@ -748,6 +755,7 @@ fsearch_application_window_init (FsearchApplicationWindow *self)
                       "closed",
                       G_CALLBACK (set_toggle_button),
                       (gpointer)self->database_toggle_button);
+#endif
 
     FsearchApplication *app = FSEARCH_APPLICATION_DEFAULT;
     g_signal_connect (app,
@@ -805,6 +813,7 @@ fsearch_application_window_init (FsearchApplicationWindow *self)
     g_object_unref (builder);
 }
 
+#if GTK_CHECK_VERSION(3,12,0)
 void
 on_database_toggle_button_toggled (GtkToggleButton *togglebutton,
                                    gpointer         user_data)
@@ -826,6 +835,7 @@ on_selection_toggle_button_toggled (GtkToggleButton *togglebutton,
     gtk_widget_set_visible (self->selection_popover,
                             gtk_toggle_button_get_active (togglebutton));
 }
+#endif
 
 void
 on_filter_combobox_changed (GtkComboBox *widget,
