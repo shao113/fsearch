@@ -99,6 +99,44 @@ iconstore_get_pixbuf (GFileInfo * file_info)
     return pixbuf;
 }
 
+GdkPixbuf *
+iconstore_get_guessed_pixbuf (const gchar *path)
+{
+    // create new hash table
+    if (pixbuf_hash_table == NULL) {
+        pixbuf_hash_table = g_hash_table_new_full (g_str_hash,
+                                                   g_str_equal,
+                                                   g_free,
+                                                   g_object_unref);
+    }
+
+    GIcon *icon = NULL;
+    if (path) {
+        gchar *content_type = g_content_type_guess (path, NULL, 1, NULL);
+        if (content_type) {
+            icon = g_content_type_get_icon(content_type);
+            g_free (content_type);
+        }
+    }
+    if (icon == NULL) {
+        icon = g_icon_new_for_string ("image-missing", NULL);
+    }
+    gchar *icon_string = g_icon_to_string (icon);
+    GdkPixbuf *pixbuf = (GdkPixbuf *) g_hash_table_lookup (pixbuf_hash_table,
+                                                           icon_string);
+    if (pixbuf == NULL) {
+        pixbuf = get_themed_icon_pixbuf (G_THEMED_ICON (icon),
+                                         ICON_SIZE,
+                                         gtk_icon_theme_get_default ());
+        g_hash_table_insert (pixbuf_hash_table,
+                             g_strdup (icon_string),
+                             pixbuf);
+    }
+    g_object_unref (icon);
+    g_free (icon_string);
+    return pixbuf;
+}
+
 void
 iconstore_clear ()
 {

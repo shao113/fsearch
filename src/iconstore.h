@@ -23,5 +23,8 @@
 GdkPixbuf *
 iconstore_get_pixbuf (GFileInfo * file_info);
 
+GdkPixbuf *
+iconstore_get_guessed_pixbuf (const gchar *path);
+
 void
 iconstore_clear ();

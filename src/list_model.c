@@ -495,12 +495,16 @@ list_model_get_value (GtkTreeModel *tree_model,
 
         case LIST_MODEL_COL_ICON:
             btree_node_get_path (node, node_path, sizeof (node_path));
-
-            if (0 <= snprintf (path, sizeof (path), "%s/%s", node_path, name)) {
-                g_file = g_file_new_for_path (path);
-                file_info = g_file_query_info (g_file, "standard::icon", 0, NULL, NULL);
-
-                pixbuf = iconstore_get_pixbuf (file_info);
+        
+            int res;
+            if (node->is_dir) {
+                res = snprintf (path, sizeof (path), "%s/%s/", node_path, name);
+            }
+            else {
+                res = snprintf (path, sizeof (path), "%s/%s", node_path, name);
+            }
+            if (0 <= res) {
+                pixbuf = iconstore_get_guessed_pixbuf (path);
                 g_value_set_object(value, pixbuf);
             }
             break;
