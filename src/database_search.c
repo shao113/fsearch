@@ -48,6 +48,7 @@ typedef struct search_query_s {
     size_t query_len;
     uint32_t has_uppercase;
     uint32_t has_separator;
+    uint32_t is_negated;
     uint32_t is_utf8;
     //uint32_t found;
 } search_query_t;
@@ -355,9 +356,21 @@ search_wildcard_icase (const char *haystack, const char *needle)
 }
 
 static uint32_t
+search_wildcard_icase_neg (const char *haystack, const char *needle)
+{
+    return !fnmatch (needle, haystack, FNM_CASEFOLD) ? 0 : 1;
+}
+
+static uint32_t
 search_wildcard (const char *haystack, const char *needle)
 {
     return !fnmatch (needle, haystack, 0) ? 1 : 0;
+}
+
+static uint32_t
+search_wildcard_neg (const char *haystack, const char *needle)
+{
+    return !fnmatch (needle, haystack, 0) ? 0 : 1;
 }
 
 static uint32_t
@@ -368,15 +381,34 @@ search_normal_icase_u8 (const char *haystack, const char *needle)
 }
 
 static uint32_t
+search_normal_icase_u8_neg (const char *haystack, const char *needle)
+{
+    // TODO: make this faster
+    return utfcasestr (haystack, needle) ? 0 : 1;
+}
+
+static uint32_t
 search_normal_icase (const char *haystack, const char *needle)
 {
     return strcasestr (haystack, needle) ? 1 : 0;
 }
 
 static uint32_t
+search_normal_icase_neg (const char *haystack, const char *needle)
+{
+    return strcasestr (haystack, needle) ? 0 : 1;
+}
+
+static uint32_t
 search_normal (const char *haystack, const char *needle)
 {
     return strstr (haystack, needle) ? 1 : 0;
+}
+
+static uint32_t
+search_normal_neg (const char *haystack, const char *needle)
+{
+    return strstr (haystack, needle) ? 0 : 1;
 }
 
 static void
@@ -395,7 +427,7 @@ search_query_free (void * data)
 }
 
 static search_query_t *
-search_query_new (const char *query, bool match_case)
+search_query_new (const char *query, bool match_case, bool is_negated)
 {
     search_query_t *new = calloc (1, sizeof (search_query_t));
     assert (new != NULL);
@@ -404,6 +436,7 @@ search_query_new (const char *query, bool match_case)
     new->query_len = strlen (query);
     new->has_uppercase = fs_str_has_upper (query);
     new->has_separator = strchr (query, '/') ? 1 : 0;
+    new->is_negated = is_negated;
     // TODO: this might not work at all times?
     if (u8_strlen (query) != new->query_len) {
         new->is_utf8 = 1;
@@ -413,26 +446,124 @@ search_query_new (const char *query, bool match_case)
     }
     if (strchr (query, '*') || strchr (query, '?')) {
         if (match_case) {
-            new->search_func = search_wildcard;
+            new->search_func = is_negated ? search_wildcard_neg : search_wildcard;
         }
         else {
-            new->search_func = search_wildcard_icase;
+            new->search_func = is_negated ? search_wildcard_icase_neg : search_wildcard_icase;
         }
     }
     else {
         if (match_case) {
-            new->search_func = search_normal;
+            new->search_func = is_negated ? search_normal_neg : search_normal;
         }
         else {
             if (new->is_utf8) {
-                new->search_func = search_normal_icase_u8;
+                new->search_func = is_negated ? search_normal_icase_u8_neg : search_normal_icase_u8;
             }
             else {
-                new->search_func = search_normal_icase;
+                new->search_func = is_negated ? search_normal_icase_neg : search_normal_icase;
             }
         }
     }
     return new;
+}
+
+static search_query_t **
+build_queries_from_regex (const gchar *query_string, bool match_case)
+{
+    char *tmp_query_copy = g_strdup (query_string);
+    assert (tmp_query_copy != NULL);
+    // remove leading/trailing whitespace
+    g_strstrip (tmp_query_copy);
+
+    search_query_t **queries = calloc (2, sizeof (search_query_t *));
+    queries[0] = search_query_new (tmp_query_copy, match_case, false);
+    queries[1] = NULL;
+    g_free (tmp_query_copy);
+    tmp_query_copy = NULL;
+
+    return queries;
+}
+
+static search_query_t **
+build_queries_from_string (const gchar *query_string, bool match_case)
+{
+    //todo empty queries ok? eg from "" or trailing "; strip_empty_terms
+
+    assert (query_string != NULL);
+
+    GSList *list = NULL;
+    const gchar *p = query_string;
+
+    while (*p) {
+        bool negate = false;
+
+        if (*p == ' ') {
+            ++p;
+            continue;
+        }
+
+        if (*p == '!') {
+            ++p;
+            negate = true;
+
+            // Skip any whitespace:
+            while (*p == ' ') {
+                ++p;
+            }
+        }
+
+        if (*p == '"') {
+            ++p;
+            const gchar *closing_quote = strchr(p, '"');
+            if (closing_quote) {
+                // Create query from quoted text:
+                gchar *term = g_strndup (p, closing_quote-p);
+                search_query_t *query = search_query_new (term, match_case, negate);
+                list = g_slist_append (list, query);
+                g_free (term);
+                p = closing_quote + 1;
+                continue;
+            } else {
+                // No closing quote; Create query from remaining text:
+                gchar *term = g_strdup (p);
+                search_query_t *query = search_query_new (term, match_case, negate);
+                list = g_slist_append (list, query);
+                g_free (term);
+                break;
+            }
+        }
+
+        if (*p) {
+            const gchar *next_space = strchr (p, ' ');
+            if (next_space) {
+                // Create query from space-delimited term:
+                gchar *term = g_strndup (p, next_space-p);
+                search_query_t *query = search_query_new (term, match_case, negate);
+                list = g_slist_append (list, query);
+                g_free (term);
+                p = next_space + 1;
+                continue;
+            } else {
+                // No remaining spaces; Create query from remaining text:
+                gchar *term = g_strdup (p);
+                search_query_t *query = search_query_new (term, match_case, negate);
+                list = g_slist_append (list, query);
+                g_free (term);
+                break;
+            }
+        }
+    }
+
+    uint32_t i = 0;
+    uint32_t list_len = g_slist_length (list);
+    search_query_t **queries = calloc (list_len + 1, sizeof (search_query_t *));
+    for (GSList *current = list; current; current = current->next) {
+        queries[i++] = current->data;
+        assert (i <= list_len);
+    }
+    g_slist_free (list);
+    return queries;
 }
 
 static search_query_t **
@@ -441,38 +572,13 @@ build_queries (DatabaseSearch *search, FsearchQuery *q)
     assert (search != NULL);
     assert (q->query != NULL);
 
-    char *tmp_query_copy = strdup (q->query);
-    assert (tmp_query_copy != NULL);
-    // remove leading/trailing whitespace
-    g_strstrip (tmp_query_copy);
-
     // check if regex characters are present
     const bool is_reg = is_regex (q->query);
     if (is_reg && search->enable_regex) {
-        search_query_t **queries = calloc (2, sizeof (search_thread_context_t *));
-        queries[0] = search_query_new (tmp_query_copy, search->match_case);
-        queries[1] = NULL;
-        g_free (tmp_query_copy);
-        tmp_query_copy = NULL;
-
-        return queries;
+        return build_queries_from_regex (q->query, search->match_case);
+    } else {
+        return build_queries_from_string (q->query, search->match_case);
     }
-    // whitespace is regarded as AND so split query there in multiple queries
-    char **tmp_queries = g_strsplit_set (tmp_query_copy, " ", -1);
-    assert (tmp_queries != NULL);
-
-    uint32_t tmp_queries_len = g_strv_length (tmp_queries);
-    search_query_t **queries = calloc (tmp_queries_len + 1, sizeof (search_thread_context_t *));
-    for (uint32_t i = 0; i < tmp_queries_len; i++) {
-        queries[i] = search_query_new (tmp_queries[i], search->match_case);
-    }
-
-    g_free (tmp_query_copy);
-    tmp_query_copy = NULL;
-    g_strfreev (tmp_queries);
-    tmp_queries = NULL;
-
-    return queries;
 }
 
 static DatabaseSearchResult *
